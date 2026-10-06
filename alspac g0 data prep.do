@@ -46,7 +46,7 @@ gen age_age51=V9996
 
 
 ********************************************************
-* HEAVY MENSTRUAL BLEEDING (HMB)
+*HEAVY MENSTRUAL BLEEDING (HMB)
 ********************************************************
 
 tab1 h110 j141 k1290 l3350 p1260 s1260 t4835 V4835
@@ -92,7 +92,7 @@ replace hmb_age51 = 1 if inlist(V4835,1,2)
 replace hmb_age51 = 0 if inlist(V4835,3,4)
 
 ********************************************************
-* MENSTRUAL PAIN (MP)
+*MENSTRUAL PAIN (MP)
 ********************************************************
 
 tab1 h111 j142 k1291 l3351 p1261 s1261 t4836 V4836
@@ -231,7 +231,6 @@ rename hmb_mp_age hmb_mp
 rename age_age age
 
 drop if missing(age)
-**GRS - should we also drop times where missing both symptoms and group small ages (<40) before doing anything with duplicates? 
 drop if hmb==. & mp==.
 tab age
 *drop if 18 or 19
