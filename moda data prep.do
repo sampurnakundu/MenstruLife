@@ -1,11 +1,7 @@
-*******************************************************
-    /*MoBa Sample code for Data preparation*/
-*******************************************************
-
 ***Data Dictionary used for Menstrual Variables: https://www.fhi.no/contentassets/1016188d845f4c5f8fa57266c454ad8c/id_20ar_versjonab.pdf ***
 
 *SAMPLE RESTRICTION
-count //We need the number for this for the sample table
+count 
  
 * Sex assigned at birth
 tab TG119
@@ -73,7 +69,7 @@ replace heavy_flow = 0 if (TG128==0 & TG129==0 & TG130==0 & TG132==0 & TG133==0 
 ta TG125 //Duration of bleeding
 
 gen prolonged_bleeding = .
-replace prolonged_bleeding = 1 if TG125 == 3   // >7 days , please check if this is correct in the actual data
+replace prolonged_bleeding = 1 if TG125 == 3   
 replace prolonged_bleeding = 0 if inlist(TG125,1,2)
 replace prolonged_bleeding = . if inlist(TG125,4,5)
 
@@ -177,8 +173,7 @@ tab income_harmonised
 
 **DESCRIPTIVE ANALYISIS**
 **Prevalence estimate: Counts and percentages of hmb, mp, hmb only, mp only, hmb or mp, hmb & mp
-tab1 hmb_age20 mp_age20 hmb_mp_either hmb_mp_age20 edu_mother_harmonised edu_father_harmonised income_harmonised //just tabulating to get the descriptives and estimates
-
+tab1 hmb_age20 mp_age20 hmb_mp_either hmb_mp_age20 edu_mother_harmonised edu_father_harmonised income_harmonised 
 **Stratified analysis**
 **Counts and row percentages
 ta edu_mother_harmonised hmb_age20, r 
