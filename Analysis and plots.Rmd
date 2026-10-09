@@ -18,7 +18,7 @@ alspac_g0_der <- read_dta("C:/Users/sk1014/OneDrive - University of Exeter/Sharp
 alspac_g1_der <- read_dta("C:/Users/sk1014/OneDrive - University of Exeter/Sharp, Gemma's files - Shared/Analysis plans/ALSPAC/alspac_g1_der.dta")
 ```
 
-## Function to check HMB/MP available at which ages
+#Function to check HMB/MP available at which ages
 ```{r}
 get_age_availability <- function(data, cohort_name){
 
@@ -45,7 +45,7 @@ get_age_availability <- function(data, cohort_name){
 
 ```
 
-##Sample plot (Figure 1)
+#Sample plot (Figure 1)
 ```{r}
 library(tidyverse)
 library(stringr)
@@ -200,10 +200,8 @@ ggsave("sample_agerange_by_cohorts.png", width = 12, height = 7, dpi = 300)
 ```
 
 # Cumulative Prevalence
-
-##Functions for cumulative prevalence
-
-##HMB only, MP only, and Co-occurance
+#Functions for cumulative prevalence
+#HMB only, MP only, and Co-occurance
 ```{r, echo=TRUE, results='asis', fig.show='hold'}
 
 calculate_lifetime_prevalence <- function(data, id_var = "participant_id", var_prefix = "hmb_mp") {
@@ -279,7 +277,7 @@ lifetime_summary <- bind_cols(
 
 ```
 
-##HMB/MP Ever
+#HMB/MP Ever
 ```{r}
 calculate_symptom_ever <- function(data, id_var = "participant_id") {
 
@@ -351,8 +349,8 @@ alspac_g1_lifetime_prev <- calculate_lifetime_prevalence(data = alspac_g1_der, i
 
 ```
 
-##Combined cumulative plots
-##HMB only, MP only and Both (Not included in paper)
+#Combined cumulative plots
+#HMB only, MP only and Both (Not included in paper)
 ```{r}
 
 combined_lifetime <- bind_rows(
@@ -408,7 +406,7 @@ ggsave("cumulative_prevalence_by_cohorts.png", width = 12, height = 6, dpi = 300
 
 ```
 
-##HMB/MP plot (Figure 2)
+#HMB/MP plot (Figure 2)
 ```{r}
 bcs_symptom_ever <- calculate_symptom_ever(data = bcs_der, id_var = "bcsid")
 bcs_symptom_ever$summary
@@ -514,7 +512,7 @@ ggsave("symptom_ever_by_cohorts.png", width = 10, height = 6, dpi = 300)
 
 ```
 
-##Cumulative prevalence summary table
+#Cumulative prevalence summary table
 ```{r}
 ever_summary <- bind_rows(
   abcd_symptom_ever$summary %>% mutate(Cohort = "ABCD"),
@@ -538,9 +536,8 @@ write_xlsx(list("Ever prevalence" = ever_summary,"Lifetime status" = lifetime_su
 ```
 
 
-## Point prevalence 
-
-## Function for Point Prevalence
+#Point prevalence 
+#Function for Point Prevalence
 
 ```{r, echo=TRUE, results='asis', fig.show='hold'}
 
@@ -648,8 +645,7 @@ calculate_point_prevalence <- function(data, id_var = "bcsid", var_prefix = "hmb
   
 ```
 
-## Point Prevalence calculation
-
+#Point Prevalence calculation
 ```{r, echo=TRUE, results='asis', fig.show='hold'}
 
 bcs_point_prev <- calculate_point_prevalence(data = bcs_der, id_var = "bcsid", var_prefix = "hmb_mp")
@@ -666,7 +662,7 @@ alspac_g1_point_prev<- calculate_point_prevalence(data = alspac_g1_der, id_var =
 
 
 # Combine prevalence tables from each cohort
-##HMB only,MP only, and Both
+#HMB only,MP only, and Both
 ```{r}
 library(dplyr)
 library(ggplot2)
@@ -701,7 +697,7 @@ combined_point$cohort <- factor(
 
 ```
 
-##HMB/MP point prev 
+#HMB/MP point prev 
 ```{r}
 calculate_point_any_correct <- function(data, cohort_name){
 
@@ -800,7 +796,7 @@ combined_any_long <- combined_any_long %>%
 ```
 
 
-##Tables- cumulative prev, point prev- hmb only, mp only, hmb&mp, hmb, mp, hmb/mp
+#Tables- cumulative prev, point prev- hmb only, mp only, hmb&mp, hmb, mp, hmb/mp
 ```{r}
 lifetime_table <- bind_rows(
   bcs_lifetime_prev$summary %>% mutate(cohort = "BCS70"),
@@ -896,7 +892,7 @@ write.csv(point_prev_any_formatted,"point_prevalence_hmb_mp_any_by_age.csv",row.
 
 ```
 
-##For supplementary table
+#For supplementary table
 ```{r}
 
 # HMB only / MP only / Both
@@ -1014,7 +1010,7 @@ write.csv(point_prevalence_table,"point_prevalence_counts.csv", row.names = FALS
 ```
 
 
-##Combined plot for point prev (Figure 3)
+#Combined plot for point prev (Figure 3)
 ```{r}
 
 dat <- read.csv("C:/Users/sk1014/OneDrive - University of Exeter/Sharp, Gemma's files - Shared/Paper/Aim 1 paper/point_prevalence_counts.csv")
@@ -1220,7 +1216,7 @@ ggsave("point_prev_final.png", plot = combined_plot, width = 9, height = 13, dpi
 ```
 
 
-##For point prev supplementary table
+#For point prev supplementary table
 ```{r}
 library(dplyr)
 library(binom)
@@ -1369,10 +1365,9 @@ write.csv(
 ```
 
 
-##Descriptive table by SES vars
-
-## Functions
-###Descriptive (Table 2)
+#Descriptive table by SES vars
+#Functions
+#Descriptive (Table 2)
 ```{r}
 extract_age_range <- function(data, prefix = "hmb_mp_age") {
 
@@ -1440,7 +1435,7 @@ write.csv(alspac_g1_table1,"ALSPAC_G1_sample_characteristics.csv",row.names=FALS
 
 ```
 
-##Statified analysis by SES
+#Statified analysis by SES
 ```{r}
 library(dplyr)
 
@@ -1924,13 +1919,7 @@ sep_export <- sep_export %>%
     Level
   )
 
-write.csv(
-  sep_export,
-  "SEP_prevalence_counts.csv",
-  row.names = FALSE
-)
-
-
+write.csv(sep_export,"SEP_prevalence_counts.csv",row.names = FALSE)
 ```
 
 
@@ -2104,7 +2093,7 @@ ggsave("ses_bar_plot.png", width = 10, height = 12, dpi = 500)
 
 ```
 
-##Ethnicity (Figure S5)
+#Ethnicity (Figure S5)
 ```{r}
 ethnicity_plot <- tribble(
   ~Cohort, ~Ethnicity, ~HMB, ~MP, ~Either,
@@ -2351,7 +2340,7 @@ write_xlsx(
 ```
 
 #Incidence analysis
-## Incidence by gynaecological age (Figure 5)
+# Incidence by gynaecological age (Figure 5)
 
 ```{r}
 library(readxl)
@@ -2487,7 +2476,7 @@ ggsave(
 ```
 
 
-##Incidence by chronological age (Figure 4)
+#Incidence by chronological age (Figure 4)
 
 ```{r}
 
@@ -2641,8 +2630,8 @@ ggsave(
 )
 ```
 
-##Incidence table
-## Supplementary table - Incidence by time since menarche
+#Incidence table
+#Supplementary table - Incidence by time since menarche
 ```{r}
 
 incidence_table_ts <- combined_inc_ts %>%
@@ -2693,7 +2682,7 @@ write.csv(
 )
 ```
 
-## Supplementary table - Incidence by chronological age
+#Supplementary table - Incidence by chronological age
 ```{r, echo=TRUE, results='asis', fig.show='hold'}
 
 incidence_table_age <- combined_inc_age %>%
