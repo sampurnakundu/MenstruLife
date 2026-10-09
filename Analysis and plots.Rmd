@@ -1,0 +1,2750 @@
+---
+title: "MenstruLife prevalence paper (Aim 1)"
+author: "Sam"
+date: "2026-05-10"
+output: html_document
+---
+# Load datasets
+```{r setup, include=FALSE}
+library(haven)
+bcs_der <- read_dta("C:/Users/sk1014/OneDrive - University of Exeter/Sharp, Gemma's files - Shared/Analysis plans/BCS1970/Merged sweeps/bcs_der.dta")
+
+abcd_der <- read_dta("C:/Users/sk1014/OneDrive - University of Exeter/Sharp, Gemma's files - Shared/Analysis plans/ABCD/abcd_der_wide.dta")
+
+raine_der <- read_dta("C:/Users/sk1014/OneDrive - University of Exeter/Sharp, Gemma's files - Shared/Analysis plans/Raine/raine_der.dta")
+
+alspac_g0_der <- read_dta("C:/Users/sk1014/OneDrive - University of Exeter/Sharp, Gemma's files - Shared/Analysis plans/ALSPAC/alspac_g0_der_point.dta")
+
+alspac_g1_der <- read_dta("C:/Users/sk1014/OneDrive - University of Exeter/Sharp, Gemma's files - Shared/Analysis plans/ALSPAC/alspac_g1_der.dta")
+```
+
+## Function to check HMB/MP available at which ages
+```{r}
+get_age_availability <- function(data, cohort_name){
+
+  df <- data %>%
+    select(starts_with("hmb_age"), starts_with("mp_age")) %>%
+    pivot_longer(
+      cols = everything(),
+      names_to = "var",
+      values_to = "value"
+    ) %>%
+    mutate(
+      symptom = ifelse(grepl("^hmb_age", var), "HMB", "MP"),
+      age = as.numeric(gsub("[^0-9]", "", var))
+    ) %>%
+    group_by(symptom, age) %>%
+    summarise(
+      available = ifelse(all(is.na(value)), 0, 1),
+      .groups = "drop"
+    ) %>%
+    mutate(cohort = cohort_name)
+
+  return(df)
+}
+
+```
+
+##Sample plot (Figure 1)
+```{r}
+library(tidyverse)
+library(stringr)
+
+moba_heat <- tibble(
+  cohort = "MoBa",
+  age = 20,
+  symptom = c("HMB", "MP"),
+  available = 1
+)
+
+heat_df <- bind_rows(
+  get_age_availability(abcd_der, "ABCD"),
+  get_age_availability(alspac_g1_der, "ALSPAC G1"),
+  get_age_availability(raine_der, "RAINE"),
+  moba_heat,
+  get_age_availability(bcs_der, "BCS70"),
+  get_age_availability(alspac_g0_der, "ALSPAC G0")
+)
+
+heat_df <- heat_df %>%
+  mutate(
+    cohort = recode(
+      cohort,
+      "ABCD" = "ABCD\n(N=5,112)",
+      "ALSPAC G1" = "ALSPAC G1\n(N=4,247)",
+      "RAINE" = "RAINE\n(N=842)",
+      "MoBa" = "MoBa\n(N=5,342)",
+      "BCS70" = "BCS70\n(N=3,687)",
+      "ALSPAC G0" = "ALSPAC G0\n(N=11,072)"
+    )
+  )
+
+heat_df$cohort <- factor(
+  heat_df$cohort,
+  levels = c(
+    "ALSPAC G0\n(N=11,072)",
+    "BCS70\n(N=3,687)",
+    "MoBa\n(N=5,342)",
+    "RAINE\n(N=842)",
+    "ALSPAC G1\n(N=4,247)",
+    "ABCD\n(N=5,112)"
+  )
+)
+
+heat_df <- heat_df %>%
+  mutate(
+    stage = case_when(
+      age < 20 ~ "Adolescence",
+      age >= 20 & age < 45 ~ "Mid reproductive life",
+      age >= 45 ~ "Late reproductive life"
+    )
+  )
+
+heat_df$stage <- factor(
+  heat_df$stage,
+  levels = c(
+    "Adolescence",
+    "Mid reproductive life",
+    "Late reproductive life"
+  )
+)
+
+heat_df <- heat_df %>%
+  group_by(cohort, symptom, stage) %>%
+  group_modify(~{
+    
+    ages <- switch(
+      as.character(.y$stage),
+      "Adolescence" = 10:19,
+      "Mid reproductive life" = 20:44,
+      "Late reproductive life" = 45:56
+    )
+    
+    tidyr::complete(
+      .x,
+      age = ages,
+      fill = list(available = 0)
+    )
+    
+  }) %>%
+  ungroup()
+
+ggplot(heat_df) +
+
+  geom_tile(
+    aes(
+      x = age,
+      y = cohort,
+      fill = factor(available)
+    ),
+    width = 0.9,
+    height = 0.75,
+    colour = "white",
+    linewidth = 0.25
+  ) +
+
+  facet_grid(
+    rows = vars(symptom),
+    cols = vars(stage),
+    scales = "free_x",
+    space = "free_x"
+  ) +
+
+  scale_fill_manual(
+    values = c(
+      "0" = "#F0F0F0",
+      "1" = "#D55E00"
+    ),
+    guide = "none"
+  ) +
+
+scale_x_continuous(
+  breaks = scales::breaks_pretty(5),
+  expand = c(0, 0)
+) +
+
+  labs(
+    x = "Age (years)",
+    y = "Cohort"
+  ) +
+
+  theme_minimal(base_size = 13) +
+
+  theme(
+    panel.grid = element_blank(),
+
+    strip.text = element_text(
+      size = 11,
+      face = "bold"
+    ),
+
+    axis.title = element_text(
+      face = "bold"
+    ),
+
+    axis.text.y = element_text(
+      size = 11
+    ),
+
+    axis.text.x = element_text(
+      size = 10
+    ),
+
+    panel.spacing.x = unit(1.5, "lines"),
+    panel.spacing.y = unit(1.2, "lines")
+  )
+
+
+ggsave("sample_agerange_by_cohorts.png", width = 12, height = 7, dpi = 300)
+
+```
+
+# Cumulative Prevalence
+
+##Functions for cumulative prevalence
+
+##HMB only, MP only, and Co-occurance
+```{r, echo=TRUE, results='asis', fig.show='hold'}
+
+calculate_lifetime_prevalence <- function(data, id_var = "participant_id", var_prefix = "hmb_mp") {
+  
+  data <- data %>% dplyr::mutate(across(starts_with(var_prefix), haven::zap_labels))
+  
+  long_data <- data %>%
+    dplyr::select(all_of(id_var), dplyr::starts_with(var_prefix)) %>%
+    tidyr::pivot_longer(
+      cols = dplyr::starts_with(var_prefix),
+      names_to = "age_var",
+      values_to = "hmb_mp"
+    ) %>%
+    dplyr::mutate(age = as.integer(gsub("[^0-9]", "", age_var)))
+  
+  lifetime_status <- long_data %>%
+    dplyr::group_by(!!rlang::sym(id_var)) %>%
+    dplyr::summarise(max_status = max(hmb_mp, na.rm = TRUE), .groups = "drop") %>%
+    dplyr::mutate(
+      status = dplyr::case_when(
+        max_status == 0 ~ "Neither",
+        max_status == 1 ~ "HMB only",
+        max_status == 2 ~ "MP only",
+        max_status == 3 ~ "HMB & MP",
+        TRUE ~ NA_character_
+      )
+    ) %>%
+    dplyr::filter(!is.na(status))
+  
+lifetime_summary <- lifetime_status %>%
+  group_by(status) %>%
+  summarise(count = n(), .groups = "drop") %>%
+  mutate(
+    total = sum(count),
+    prevalence = count / total
+  )
+
+ci <- binom::binom.wilson(
+  lifetime_summary$count,
+  lifetime_summary$total
+)
+
+lifetime_summary <- bind_cols(
+  lifetime_summary,
+  ci %>% select(lower, upper)
+) %>%
+  mutate(
+    percent = round(prevalence * 100, 1),
+    lower_ci = round(lower * 100, 1),
+    upper_ci = round(upper * 100, 1)
+  )
+  
+  # Plot
+  p <- ggplot(lifetime_summary, aes(x = reorder(status, -percent), y = percent, fill = status)) +
+    geom_col(color = "grey40", width = 0.6) +
+    geom_text(aes(label = paste0(percent, "%")), vjust = -0.4, size = 4) +
+    scale_fill_brewer(palette = "Set2") +
+    labs(
+      title = "Cumulative Prevalence of HMB and/or MP",
+      x = NULL,
+      y = "Percentage (%)"
+    ) +
+    theme_minimal(base_size = 14) +
+    theme(
+      legend.position = "none",
+      panel.grid.major.x = element_blank(),
+      plot.title = element_text(face = "bold", size = 16)
+    )
+  
+  return(list(summary = lifetime_summary, plot = p))
+}
+
+
+```
+
+##HMB/MP Ever
+```{r}
+calculate_symptom_ever <- function(data, id_var = "participant_id") {
+
+  library(dplyr)
+
+  hmb_vars <- grep("^hmb_age", names(data), value = TRUE)
+  mp_vars  <- grep("^mp_age", names(data), value = TRUE)
+
+  data_ever <- data %>%
+    mutate(
+      hmb_ever = ifelse(rowSums(select(., all_of(hmb_vars)) == 1, na.rm = TRUE) > 0, 1, 0),
+      mp_ever  = ifelse(rowSums(select(., all_of(mp_vars)) == 1, na.rm = TRUE) > 0, 1, 0),
+      both_ever = ifelse(hmb_ever == 1 | mp_ever == 1, 1, 0)
+    )
+
+summary_table <- tibble(
+  symptom = c("HMB ever","MP ever","Either ever"),
+  count = c(
+    sum(data_ever$hmb_ever, na.rm=TRUE),
+    sum(data_ever$mp_ever, na.rm=TRUE),
+    sum(data_ever$both_ever, na.rm=TRUE)
+  ),
+  total = nrow(data_ever)
+) %>%
+  mutate(
+    prevalence = count/total
+  )
+
+ci <- binom::binom.wilson(
+  summary_table$count,
+  summary_table$total
+)
+
+summary_table <- bind_cols(
+  summary_table,
+  ci %>% select(lower, upper)
+) %>%
+  mutate(
+    percent = round(prevalence*100,1),
+    lower_ci = round(lower*100,1),
+    upper_ci = round(upper*100,1)
+  )
+
+  return(list(
+    data = data_ever,
+    summary = summary_table
+  ))
+}
+```
+
+## Cumulative prevalence calculation
+
+```{r, echo=TRUE, results='asis', fig.show='hold'}
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+library(haven)
+library(rlang)
+
+bcs_lifetime_prev <- calculate_lifetime_prevalence(data = bcs_der, id_var = "bcsid", var_prefix = "hmb_mp")
+
+abcd_lifetime_prev <- calculate_lifetime_prevalence(data = abcd_der, id_var = "participant_id", var_prefix = "hmb_mp")
+
+raine_lifetime_prev <- calculate_lifetime_prevalence(data = raine_der, id_var = "ID", var_prefix = "hmb_mp")
+
+alspac_g0_lifetime_prev <- calculate_lifetime_prevalence(data = alspac_g0_der, id_var = "cidB4396", var_prefix = "hmb_mp")
+
+alspac_g1_lifetime_prev <- calculate_lifetime_prevalence(data = alspac_g1_der, id_var = "cidB4396", var_prefix = "hmb_mp")
+
+```
+
+##Combined cumulative plots
+##HMB only, MP only and Both (Not included in paper)
+```{r}
+
+combined_lifetime <- bind_rows(
+  bcs_lifetime_prev$summary %>% mutate(cohort = "BCS70"),
+  abcd_lifetime_prev$summary %>% mutate(cohort = "ABCD"),
+  raine_lifetime_prev$summary %>% mutate(cohort = "RAINE"),
+  alspac_g0_lifetime_prev$summary %>% mutate(cohort = "ALSPAC G0"),
+  alspac_g1_lifetime_prev$summary %>% mutate(cohort = "ALSPAC G1")
+)
+
+combined_lifetime$cohort <- factor(
+  combined_lifetime$cohort,
+  levels = c("ABCD", "ALSPAC G1", "RAINE", "BCS70", "ALSPAC G0")
+)
+
+ggplot(combined_lifetime, aes(x = cohort, y = percent, fill = status)) +
+  geom_col(position = position_dodge(width = 0.7), 
+           color = "grey40", width = 0.6) +
+  geom_errorbar(
+  aes(
+    ymin = lower_ci,
+    ymax = upper_ci
+  ),
+  position = position_dodge(width = 0.7),
+  width = 0.2,
+  linewidth = 0.4
+) +
+  geom_text(
+  aes(
+    y = upper_ci + 1.4,
+    label = paste0(percent, "%")
+  ),
+  position = position_dodge(width = 0.7),
+  size = 3.8
+) +
+  scale_fill_manual(values = c(
+  "Neither"   = "#E0E0E0",
+  "MP only"   = "#A6A6A6",
+  "HMB only"  = "#737373",
+  "HMB & MP"  = "grey25"
+)) +
+  labs(
+    x = "Cohort",
+    y = "Percentage (%)",
+    fill = "Symptom Status"
+  ) +
+  theme_minimal(base_size = 14) +
+  theme(
+    legend.position = "bottom",
+    plot.title = element_text(face = "bold", size = 16)
+  )
+ggsave("cumulative_prevalence_by_cohorts.png", width = 12, height = 6, dpi = 300)
+
+```
+
+##HMB/MP plot (Figure 2)
+```{r}
+bcs_symptom_ever <- calculate_symptom_ever(data = bcs_der, id_var = "bcsid")
+bcs_symptom_ever$summary
+
+abcd_symptom_ever <- calculate_symptom_ever(abcd_der, id_var = "participant_id")
+abcd_symptom_ever$summary
+
+raine_symptom_ever <- calculate_symptom_ever(raine_der, id_var = "ID")
+raine_symptom_ever$summary
+
+alspac_g0_symptom_ever <- calculate_symptom_ever(alspac_g0_der, id_var = "cidB4396")
+alspac_g0_symptom_ever$summary
+
+alspac_g1_symptom_ever <- calculate_symptom_ever(alspac_g1_der, id_var = "cidB4396")
+alspac_g1_symptom_ever$summary
+
+ever_combined <- bind_rows(
+  bcs_symptom_ever$summary %>% mutate(cohort = "BCS70"),
+  abcd_symptom_ever$summary %>% mutate(cohort = "ABCD"),
+  raine_symptom_ever$summary %>% mutate(cohort = "RAINE"),
+  alspac_g0_symptom_ever$summary %>% mutate(cohort = "ALSPAC G0"),
+  alspac_g1_symptom_ever$summary %>% mutate(cohort = "ALSPAC G1")
+)
+
+ever_combined
+
+unique(ever_combined$symptom)
+ever_combined <- ever_combined %>%
+  mutate(
+    symptom = trimws(symptom)   
+  )
+
+ever_combined$cohort <- factor(
+  ever_combined$cohort,
+  levels = c("ABCD","ALSPAC G1","RAINE","BCS70","ALSPAC G0")
+)
+ever_combined$symptom <- factor(
+  ever_combined$symptom,
+  levels = c(
+    "HMB ever",
+    "MP ever",
+    "Either ever"
+  )
+)
+
+ever_plot <- ggplot(
+  ever_combined,
+  aes(x = cohort, y = percent, fill = symptom)
+) +
+
+  geom_col(
+    position = position_dodge(width = 0.8),
+    width = 0.7,
+    color = "grey30"
+  ) +
+geom_errorbar(
+  aes(
+    ymin = lower_ci,
+    ymax = upper_ci
+  ),
+  position = position_dodge(width = 0.8),
+  width = 0.15,
+  linewidth = 0.4
+) +
+geom_text(
+  aes(
+    y = upper_ci + 1.8,
+    label = paste0(percent, "%")
+  ),
+  position = position_dodge(width = 0.8),
+  size = 3.8
+) +
+
+  scale_fill_manual(
+    values = c(
+      "HMB ever" = "grey30",
+      "MP ever" = "grey55",
+      "Either ever" = "grey75"
+    )
+  ) +
+scale_y_continuous(
+  limits = c(0,100),
+  expand = expansion(mult = c(0,0.02))
+) +
+  labs(
+    x = "Cohort",
+    y = "Percentage (%)",
+    fill = "Symptom status"
+  ) +
+
+  theme_minimal(base_size = 14) +
+
+  theme(
+    legend.position = "bottom",
+    panel.grid.major.x = element_blank(),
+    plot.title = element_text(face = "bold", size = 16)
+  )
+
+ever_plot
+
+ggsave("symptom_ever_by_cohorts.png", width = 10, height = 6, dpi = 300)
+
+
+```
+
+##Cumulative prevalence summary table
+```{r}
+ever_summary <- bind_rows(
+  abcd_symptom_ever$summary %>% mutate(Cohort = "ABCD"),
+  alspac_g1_symptom_ever$summary %>% mutate(Cohort = "ALSPAC G1"),
+  raine_symptom_ever$summary %>% mutate(Cohort = "RAINE"),
+  bcs_symptom_ever$summary %>% mutate(Cohort = "BCS70"),
+  alspac_g0_symptom_ever$summary %>% mutate(Cohort = "ALSPAC G0")
+) %>%
+  select(Cohort, everything())
+lifetime_summary <- bind_rows(
+  abcd_lifetime_prev$summary %>% mutate(Cohort = "ABCD"),
+  alspac_g1_lifetime_prev$summary %>% mutate(Cohort = "ALSPAC G1"),
+  raine_lifetime_prev$summary %>% mutate(Cohort = "RAINE"),
+  bcs_lifetime_prev$summary %>% mutate(Cohort = "BCS70"),
+  alspac_g0_lifetime_prev$summary %>% mutate(Cohort = "ALSPAC G0")
+) %>%
+  select(Cohort, everything())
+library(writexl)
+
+write_xlsx(list("Ever prevalence" = ever_summary,"Lifetime status" = lifetime_summary),"Cumulative_prevalence_with_CIs.xlsx")
+```
+
+
+## Point prevalence 
+
+## Function for Point Prevalence
+
+```{r, echo=TRUE, results='asis', fig.show='hold'}
+
+calculate_point_prevalence <- function(data, id_var = "bcsid", var_prefix = "hmb_mp") {
+  
+  hmb_mp_long <- data %>%
+    dplyr::select(all_of(id_var), starts_with(var_prefix)) %>%
+    pivot_longer(
+      cols = starts_with(var_prefix),
+      names_to = "age",
+      values_to = "hmb_mp"
+    ) %>%
+    mutate(
+      hmb_mp = suppressWarnings(as.numeric(hmb_mp)),  
+      age = as.integer(gsub("[^0-9]", "", age))
+    ) %>%
+    filter(!is.na(age)) %>%
+    filter(hmb_mp %in% 0:3) %>%  
+    mutate(
+      status = dplyr::case_when(
+        hmb_mp == 0 ~ "Neither",
+        hmb_mp == 1 ~ "HMB only",
+        hmb_mp == 2 ~ "MP only",
+        hmb_mp == 3 ~ "HMB & MP"
+      )
+    )
+  
+  point_prev <- hmb_mp_long %>%
+    group_by(age, status) %>%
+    summarise(n = n(), .groups = "drop") %>%
+    group_by(age) %>%
+    mutate(
+      total = sum(n),
+      Prevalence = n / total,
+      SE = sqrt((Prevalence * (1 - Prevalence)) / total),
+      lci = Prevalence - 1.96 * SE,
+      uci = Prevalence + 1.96 * SE
+    ) %>%
+    ungroup() %>%
+    dplyr::select(age, status, n, Prevalence, SE, lci, uci)
+  
+  cat("\nPoint Prevalence of HMB and/or MP by age:\n\n")
+  print(point_prev)
+  
+  #Plots
+  p1 <- ggplot(point_prev, aes(x = age, y = Prevalence, ymin = lci, ymax = uci)) +
+    geom_errorbar(width = 0.5) +
+    geom_point(size = 1) +
+    facet_wrap(~ status) +
+    labs(
+      title = "Prevalence of HMB/MP by Age with 95% CI",
+      x = "Age",
+      y = "Prevalence"
+    ) +
+    theme_minimal()
+  
+  p2 <- ggplot(point_prev, aes(x = factor(age), y = Prevalence, fill = status)) +
+    geom_col(position = position_dodge(width = 0.9)) +
+    geom_text(
+      aes(label = paste0(round(Prevalence * 100, 1), "%")),
+      position = position_dodge(width = 0.9),
+      vjust = -0.3, size = 3
+    ) +
+    scale_y_continuous(labels = scales::percent_format(accuracy = 1)) +
+    labs(
+      title = "Point prevalence by age",
+      x = "Age",
+      y = "Prevalence (%)",
+      fill = "Status"
+    ) +
+    theme_minimal()
+  
+  p3 <- ggplot(point_prev, aes(x = age, y = Prevalence, group = status, color = status)) +
+    geom_point() +
+    geom_smooth(method = "loess", se = FALSE) +
+    labs(
+      title = "Point Prevalence by Age",
+      x = "Age",
+      y = "Prevalence",
+      color = "Status"
+    ) +
+    theme_minimal()
+  
+  p4 <- ggplot(point_prev, aes(x = age, y = Prevalence, ymin = lci, ymax = uci, color = status)) +
+    geom_errorbar(width = 0.4) +
+    geom_point(size = 1) +
+    labs(
+      title = "Prevalence with 95% CI by Age and Status",
+      x = "Age",
+      y = "Prevalence",
+      color = "Status"
+    ) +
+    theme_minimal()
+  
+  # Return results
+  invisible(list(
+    prevalence_table = point_prev,
+    plot_facet = p1,
+    plot_bar = p2,
+    plot_trend = p3,
+    plot_errorbar = p4
+  ))
+}
+
+  
+```
+
+## Point Prevalence calculation
+
+```{r, echo=TRUE, results='asis', fig.show='hold'}
+
+bcs_point_prev <- calculate_point_prevalence(data = bcs_der, id_var = "bcsid", var_prefix = "hmb_mp")
+
+abcd_point_prev<- calculate_point_prevalence(data = abcd_der, id_var = "participant_id", var_prefix = "hmb_mp")
+
+raine_point_prev<- calculate_point_prevalence(data = raine_der, id_var = "ID", var_prefix = "hmb_mp")
+
+alspac_g0_point_prev<- calculate_point_prevalence(data = alspac_g0_der, id_var = "cidB4396", var_prefix = "hmb_mp")
+
+alspac_g1_point_prev<- calculate_point_prevalence(data = alspac_g1_der, id_var = "cidB4396", var_prefix = "hmb_mp")
+
+```
+
+
+# Combine prevalence tables from each cohort
+##HMB only,MP only, and Both
+```{r}
+library(dplyr)
+library(ggplot2)
+
+moba_point <- tibble(cohort = "MoBa",age = 20, status = c("HMB & MP", "HMB only", "MP only"), 
+                     percent = c(21.7, 3.8, 52.2)) #Based on the results sent from MoBa team
+
+combined_point <- bind_rows(
+  bcs_point_prev$prevalence_table %>% mutate(cohort = "BCS70"),
+  abcd_point_prev$prevalence_table %>% mutate(cohort = "ABCD"),
+  raine_point_prev$prevalence_table %>% mutate(cohort = "RAINE"),
+  alspac_g0_point_prev$prevalence_table %>% mutate(cohort = "ALSPAC G0"),
+  alspac_g1_point_prev$prevalence_table %>% mutate(cohort = "ALSPAC G1")
+)
+combined_point <- combined_point %>%
+  filter(status %in% c("HMB only", "MP only", "HMB & MP")) %>%
+  mutate(percent = Prevalence * 100)
+
+combined_point <- bind_rows(  combined_point, moba_point)
+
+combined_point$age <- as.numeric(combined_point$age)
+
+combined_point$status <- factor(
+  combined_point$status,
+  levels = c("HMB only", "MP only", "HMB & MP")
+)
+
+combined_point$cohort <- factor(
+  combined_point$cohort,
+  levels = c("ABCD", "ALSPAC G1", "MoBa", "RAINE", "BCS70", "ALSPAC G0")
+)
+
+```
+
+##HMB/MP point prev 
+```{r}
+calculate_point_any_correct <- function(data, cohort_name){
+
+  library(dplyr)
+  library(tibble)
+
+  hmb_vars <- grep("^hmb_age", names(data), value = TRUE)
+  mp_vars  <- grep("^mp_age", names(data), value = TRUE)
+
+  ages <- unique(gsub("[^0-9]", "", hmb_vars))
+
+  results <- lapply(ages, function(a){
+
+    hmb_var <- paste0("hmb_age", a)
+    mp_var  <- paste0("mp_age", a)
+
+    if(!(hmb_var %in% names(data) & mp_var %in% names(data))) return(NULL)
+
+    df <- data
+
+    # HMB
+    hmb_obs <- !is.na(df[[hmb_var]])
+    n_hmb_total <- sum(hmb_obs)
+    n_hmb <- sum(df[[hmb_var]] == 1, na.rm = TRUE)
+    hmb_prev <- n_hmb / n_hmb_total
+
+    # MP
+    mp_obs <- !is.na(df[[mp_var]])
+    n_mp_total <- sum(mp_obs)
+    n_mp <- sum(df[[mp_var]] == 1, na.rm = TRUE)
+    mp_prev <- n_mp / n_mp_total
+
+    # ANY
+    any_obs <- hmb_obs | mp_obs
+    n_any_total <- sum(any_obs)
+    n_any <- sum(
+      (df[[hmb_var]] == 1 | df[[mp_var]] == 1),
+      na.rm = TRUE
+    )
+    any_prev <- n_any / n_any_total
+
+    tibble(
+      cohort = cohort_name,
+      age = as.numeric(a),
+
+      # counts
+      n_HMB = n_hmb,
+      n_MP  = n_mp,
+      n_any = n_any,
+
+      # denominators (optional but useful)
+      denom_HMB = n_hmb_total,
+      denom_MP  = n_mp_total,
+      denom_any = n_any_total,
+
+      # percentages
+      HMB = hmb_prev * 100,
+      MP  = mp_prev * 100,
+      `HMB or MP` = any_prev * 100
+    )
+  })
+
+  bind_rows(results)
+}
+abcd_any   <- calculate_point_any_correct(abcd_der, "ABCD")
+g1_any     <- calculate_point_any_correct(alspac_g1_der, "ALSPAC G1")
+raine_any  <- calculate_point_any_correct(raine_der, "RAINE")
+bcs_any    <- calculate_point_any_correct(bcs_der, "BCS70")
+g0_any     <- calculate_point_any_correct(alspac_g0_der, "ALSPAC G0")
+
+moba_any <- tibble(
+  cohort = "MoBa",
+  age = 20,
+  HMB = 25.1,
+  MP = 73.9,
+  `HMB or MP` = 77.2
+)
+
+
+combined_any <- bind_rows(abcd_any, g1_any, raine_any, moba_any, bcs_any, g0_any)
+
+combined_any_long <- combined_any %>%
+  pivot_longer(
+    cols = c(HMB, MP, `HMB or MP`),
+    names_to = "status",
+    values_to = "percent"
+  )
+
+combined_any_long <- combined_any_long %>%
+  mutate(
+    age = as.numeric(age),
+    status = factor(status, levels = c("HMB","MP","HMB or MP")),
+    cohort = factor(cohort, levels = c("ABCD","ALSPAC G1","RAINE","MoBa", "BCS70","ALSPAC G0"))
+  )
+
+```
+
+
+##Tables- cumulative prev, point prev- hmb only, mp only, hmb&mp, hmb, mp, hmb/mp
+```{r}
+lifetime_table <- bind_rows(
+  bcs_lifetime_prev$summary %>% mutate(cohort = "BCS70"),
+  abcd_lifetime_prev$summary %>% mutate(cohort = "ABCD"),
+  raine_lifetime_prev$summary %>% mutate(cohort = "RAINE"),
+  alspac_g0_lifetime_prev$summary %>% mutate(cohort = "ALSPAC G0"),
+  alspac_g1_lifetime_prev$summary %>% mutate(cohort = "ALSPAC G1")
+) %>%
+
+  filter(status != "Neither") %>%
+
+  mutate(
+    percent = round(percent, 1),
+    value = paste0(count, " (", percent, "%)")
+  ) %>%
+
+  select(cohort, status, value) %>%
+
+  pivot_wider(
+    names_from = status,
+    values_from = value
+  ) %>%
+
+  mutate(
+    cohort = factor(cohort,
+      levels = c("ABCD","ALSPAC G1","RAINE","BCS70","ALSPAC G0")
+    )
+  ) %>%
+
+  arrange(cohort)
+
+lifetime_table
+
+combined_point <- bind_rows(
+  bcs_point_prev$prevalence_table %>% mutate(cohort = "BCS70"),
+  abcd_point_prev$prevalence_table %>% mutate(cohort = "ABCD"),
+  raine_point_prev$prevalence_table %>% mutate(cohort = "RAINE"),
+  alspac_g0_point_prev$prevalence_table %>% mutate(cohort = "ALSPAC G0"),
+  alspac_g1_point_prev$prevalence_table %>% mutate(cohort = "ALSPAC G1")
+)
+point_table <- combined_point %>%
+
+  filter(status %in% c("HMB only","MP only","HMB & MP", "Neither")) %>%
+
+  mutate(
+    percent = round(Prevalence * 100, 1),
+    value = paste0(n, " (", percent, ")")
+  ) %>%
+
+  select(cohort, age, status, value) %>%
+
+  pivot_wider(
+    names_from = status,
+    values_from = value
+  ) %>%
+
+  mutate(
+    cohort = factor(cohort,
+      levels = c("ABCD","ALSPAC G1","RAINE","BCS70","ALSPAC G0")
+    )
+  ) %>%
+
+  arrange(cohort, age)
+
+point_table
+
+point_prev_any_formatted <- combined_any %>%
+
+  mutate(
+    HMB = paste0(n_HMB, " (", round(HMB,1), ")"),
+    MP  = paste0(n_MP,  " (", round(MP,1), ")"),
+    `HMB or MP` = paste0(n_any, " (", round(`HMB or MP`,1), ")")
+  ) %>%
+
+  select(cohort, age, HMB, MP, `HMB or MP`) %>%
+
+  mutate(
+    cohort = factor(cohort,
+      levels = c("ABCD","ALSPAC G1","RAINE","BCS70","ALSPAC G0")
+    )
+  ) %>%
+
+  arrange(cohort, age)
+
+point_prev_any_formatted
+
+write.csv(lifetime_table, "lifetime_prevalence_table.csv", row.names = FALSE)
+
+write.csv(point_table, "point_prevalence_table.csv", row.names = FALSE)
+
+write.csv(point_prev_any_formatted,"point_prevalence_hmb_mp_any_by_age.csv",row.names = FALSE)
+
+
+```
+
+##For supplementary table
+```{r}
+
+# HMB only / MP only / Both
+status_counts <- combined_point %>%
+
+  filter(status %in% c("HMB only", "MP only", "HMB & MP")) %>%
+
+  select(
+    cohort,
+    age,
+    status,
+    n
+  ) %>%
+
+  pivot_wider(
+    names_from = status,
+    values_from = n
+  ) %>%
+
+  rename(
+    Both = `HMB & MP`
+  )
+
+# HMB any / MP any / Either / Total / Neither
+any_counts <- combined_any %>%
+
+  transmute(
+    cohort,
+    age,
+    HMB_any = n_HMB,
+    MP_any = n_MP,
+    Either = n_any,
+    Total = denom_any,
+    Neither = denom_any - n_any
+  )
+
+# Merge
+point_prevalence_table <- left_join(
+  any_counts,
+  status_counts,
+  by = c("cohort", "age")
+)
+
+# Add MoBa
+moba_row <- tibble(
+  cohort = "MOBA",
+  age = 20,
+  HMB_any = 1340,
+  MP_any = 3946,
+  Either = 4126,
+  Both = 1160,
+  `HMB only` = 180,
+  `MP only` = 2786,
+  Total = 5342,
+  Neither = 1216
+)
+
+point_prevalence_table <- bind_rows(
+  point_prevalence_table,
+  moba_row
+)
+
+point_prevalence_table <- point_prevalence_table %>%
+  mutate(
+    Both = tidyr::replace_na(Both, 0),
+    `HMB only` = tidyr::replace_na(`HMB only`, 0),
+    `MP only` = tidyr::replace_na(`MP only`, 0)
+  )
+
+point_prevalence_table <- point_prevalence_table %>%
+
+  mutate(
+
+    `Age group` = case_when(
+      age < 20 ~ "Ado",
+      age >= 20 & age < 45 ~ "Mid",
+      age >= 45 ~ "Peri"
+    ),
+
+    cohort = factor(
+      cohort,
+      levels = c(
+        "ABCD",
+        "ALSPAC G1",
+        "RAINE",
+        "MOBA",
+        "BCS70",
+        "ALSPAC G0"
+      )
+    )
+
+  ) %>%
+
+  arrange(cohort, age)
+
+# Final table
+point_prevalence_table <- point_prevalence_table %>%
+
+  select(
+    Cohort = cohort,
+    `Age group`,
+    Age = age,
+    `HMB any` = HMB_any,
+    `MP any` = MP_any,
+    Either,
+    Both,
+    `HMB only`,
+    `MP only`,
+    Total,
+    Neither
+  )
+
+# Export
+write.csv(point_prevalence_table,"point_prevalence_counts.csv", row.names = FALSE)
+```
+
+
+##Combined plot for point prev (Figure 3)
+```{r}
+
+dat <- read.csv("C:/Users/sk1014/OneDrive - University of Exeter/Sharp, Gemma's files - Shared/Paper/Aim 1 paper/point_prevalence_counts.csv")
+
+
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+install.packages("binom")
+library(binom)
+install.packages("ggh4x")
+library(ggh4x)
+library(patchwork)
+
+prev_dat <- bind_rows(
+  
+  # HMB
+  dat %>%
+    transmute(
+      Cohort,
+      Age,
+      Age.group,
+      Total,
+      Symptom = "HMB",
+      Type = "Any",
+      Cases = HMB.any
+    ),
+  
+  dat %>%
+    transmute(
+      Cohort,
+      Age,
+      Age.group,
+      Total,
+      Symptom = "HMB",
+      Type = "Isolated",
+      Cases = HMB.only
+    ),
+  
+  # MP
+  dat %>%
+    transmute(
+      Cohort,
+      Age,
+      Age.group,
+      Total,
+      Symptom = "MP",
+      Type = "Any",
+      Cases = MP.any
+    ),
+  
+  dat %>%
+    transmute(
+      Cohort,
+      Age,
+      Age.group,
+      Total,
+      Symptom = "MP",
+      Type = "Isolated",
+      Cases = MP.only
+    ),
+  
+  # BOTH
+  dat %>%
+    transmute(
+      Cohort,
+      Age,
+      Age.group,
+      Total,
+      Symptom = "Both",
+      Type = "Co-occurring",
+      Cases = Both
+    )
+  
+) %>%
+  
+  filter(
+    !is.na(Cases),
+    !is.na(Total),
+    Total > 0
+  )
+
+prev_dat$Symptom <- factor(
+  prev_dat$Symptom,
+  levels = c("HMB", "MP", "Both")
+)
+
+prev_dat$Type <- factor(
+  prev_dat$Type,
+  levels = c("Any", "Isolated", "Co-occurring")
+)
+
+ci <- binom::binom.wilson(
+  prev_dat$Cases,
+  prev_dat$Total
+)
+
+prev_dat <- bind_cols(prev_dat, ci)
+
+make_plot <- function(agegroup, title_text, xlab_text = "") {
+  
+  ggplot(
+    prev_dat[prev_dat$Age.group == agegroup, ],
+    aes(
+      x = Age,
+      y = mean,
+      colour = Type,
+      group = Type
+    )
+  ) +
+    
+    geom_line(size = 0.5) +
+    
+    geom_point(size = 1) +
+    
+    geom_errorbar(
+      aes(
+        ymin = lower,
+        ymax = upper
+      ),
+      width = 0.2,
+      size = 0.5
+    ) +
+    
+    facet_nested(
+      Cohort ~ Symptom,
+      scales = "free"
+    ) +
+    
+    scale_y_continuous(
+      labels = scales::percent
+    ) +
+    
+    scale_colour_manual(
+      values = c(
+        "Any" = "cornflowerblue",
+        "Isolated" = "skyblue2",
+        "Co-occurring" = "darkblue"
+      )
+    ) +
+    
+    theme_bw() +
+    
+    theme(
+      strip.text.y = element_text(angle = 0),
+      panel.spacing = unit(0.01, "lines"),
+      plot.title = element_text(
+        size = 10,
+        face = "bold"
+      ),
+      axis.title = element_text(size = 10),
+      axis.text = element_text(size = 8),
+      strip.text = element_text(size = 8),
+      plot.margin = margin(2, 2, 2, 2),
+      legend.margin = margin(t = -5),
+      legend.box.margin = margin(t = -8),
+      legend.title = element_blank(),
+      panel.grid.minor = element_blank(),
+      panel.grid.major = element_line(size = 0.2)
+    ) +
+    
+    ylab("Prevalence") +
+    xlab(xlab_text) +
+    ggtitle(title_text)
+}
+
+Ado_plot <- make_plot(
+  agegroup = "Ado",
+  title_text = "Adolescence"
+)
+
+Mid_plot <- make_plot(
+  agegroup = "Mid",
+  title_text = "Mid reproductive life"
+)
+
+Late_plot <- make_plot(
+  agegroup = "Peri",
+  title_text = "Late reproductive life",
+  xlab_text = "Age"
+)
+
+combined_plot <- (
+  Ado_plot /
+    Mid_plot /
+    Late_plot
+) +
+  
+  plot_layout(
+    guides = "collect",
+    heights = c(3, 4, 2)
+  ) &
+  
+  theme(
+    legend.position = "bottom"
+  )
+
+combined_plot
+
+ggsave("point_prev_final.png", plot = combined_plot, width = 9, height = 13, dpi = 500)
+
+
+```
+
+
+##For point prev supplementary table
+```{r}
+library(dplyr)
+library(binom)
+
+export_prev <- dat
+
+# Calculate prevalence and Wilson CIs
+
+calc_ci <- function(cases, total, prefix){
+
+  ci <- binom::binom.wilson(cases, total)
+
+  tibble(
+    !!paste0(prefix,"_prev")  := ci$mean * 100,
+    !!paste0(prefix,"_lower") := ci$lower * 100,
+    !!paste0(prefix,"_upper") := ci$upper * 100
+  )
+
+}
+
+export_prev <- bind_cols(
+
+  export_prev,
+
+  calc_ci(export_prev$HMB.any, export_prev$Total, "HMB_any"),
+
+  calc_ci(export_prev$MP.any, export_prev$Total, "MP_any"),
+
+  calc_ci(export_prev$Either, export_prev$Total, "Either"),
+
+  calc_ci(export_prev$HMB.only, export_prev$Total, "HMB_only"),
+
+  calc_ci(export_prev$MP.only, export_prev$Total, "MP_only"),
+
+  calc_ci(export_prev$Both, export_prev$Total, "Both"),
+
+  calc_ci(export_prev$Neither, export_prev$Total, "Neither")
+
+)
+export_prev <- export_prev %>%
+
+  mutate(
+
+    across(
+      ends_with("_prev"),
+      ~round(.x,1)
+    ),
+
+    across(
+      ends_with("_lower"),
+      ~round(.x,1)
+    ),
+
+    across(
+      ends_with("_upper"),
+      ~round(.x,1)
+    )
+
+  )
+
+export_prev <- dat %>%
+
+  bind_cols(
+
+    calc_ci(dat$HMB.any,   dat$Total, "HMB_any"),
+    calc_ci(dat$MP.any,    dat$Total, "MP_any"),
+    calc_ci(dat$Either,    dat$Total, "Either"),
+    calc_ci(dat$HMB.only,  dat$Total, "HMB_only"),
+    calc_ci(dat$MP.only,   dat$Total, "MP_only"),
+    calc_ci(dat$Both,      dat$Total, "Both"),
+    calc_ci(dat$Neither,   dat$Total, "Neither")
+
+  ) %>%
+
+  mutate(
+
+    `HMB any` = sprintf(
+      "%.1f (%.1f-%.1f)",
+      HMB_any_prev,
+      HMB_any_lower,
+      HMB_any_upper
+    ),
+
+    `MP any` = sprintf(
+      "%.1f (%.1f-%.1f)",
+      MP_any_prev,
+      MP_any_lower,
+      MP_any_upper
+    ),
+
+    `Either` = sprintf(
+      "%.1f (%.1f-%.1f)",
+      Either_prev,
+      Either_lower,
+      Either_upper
+    ),
+
+    `HMB only` = sprintf(
+      "%.1f (%.1f-%.1f)",
+      HMB_only_prev,
+      HMB_only_lower,
+      HMB_only_upper
+    ),
+
+    `MP only` = sprintf(
+      "%.1f (%.1f-%.1f)",
+      MP_only_prev,
+      MP_only_lower,
+      MP_only_upper
+    ),
+
+    `Both` = sprintf(
+      "%.1f (%.1f-%.1f)",
+      Both_prev,
+      Both_lower,
+      Both_upper
+    ),
+
+    `Neither` = sprintf(
+      "%.1f (%.1f-%.1f)",
+      Neither_prev,
+      Neither_lower,
+      Neither_upper
+    )
+
+  ) %>%
+
+  select(
+    Cohort,
+    Age.group,
+    Age,
+    Total,
+    `HMB any`,
+    `MP any`,
+    Either,
+    `HMB only`,
+    `MP only`,
+    Both,
+    Neither
+  )
+write.csv(
+  export_prev,
+  "point_prevalence_plot_data.csv",
+  row.names = FALSE
+)
+```
+
+
+##Descriptive table by SES vars
+
+## Functions
+###Descriptive (Table 2)
+```{r}
+extract_age_range <- function(data, prefix = "hmb_mp_age") {
+
+  age_vars <- grep(prefix, names(data), value = TRUE)
+  ages <- as.numeric(gsub("[^0-9]", "", age_vars))
+
+  paste0(min(ages, na.rm = TRUE), "–", max(ages, na.rm = TRUE))
+
+}
+
+create_descriptive_table <- function(data, vars){
+
+  sample_size <- nrow(data)
+  age_range <- extract_age_range(data)
+
+  sample_info <- tibble(
+    Variable = c("Sample size", "Age range"),
+    Category = "",
+    Value = c(sample_size, age_range)
+  )
+
+  var_tables <- map_df(vars, function(v){
+
+    data %>%
+      filter(!is.na(.data[[v]])) %>%
+      count(.data[[v]]) %>%
+      mutate(
+        percent = round(100*n/sum(n),1),
+        Variable = v,
+        Category = as.character(.data[[v]]),
+        Value = paste0(n," (",percent,")")
+      ) %>%
+      select(Variable, Category, Value)
+
+  })
+
+  bind_rows(sample_info, var_tables)
+
+}
+```
+
+
+```{r}
+abcd_vars <- c("edu_parent_harmonised","income_harmonised","ethnicity_harmonised")
+
+bcs_vars <- c("edu_mother_harmonised","edu_father_harmonised","occ_mother_harmonised","occ_father_harmonised","income_harmonised", "ethnicity_harmonised")
+
+raine_vars <- c("edu_mother_harmonised","edu_father_harmonised","income_harmonised", "ethnicity_harmonised")
+
+alspac_g0_vars <- c("ethnicity_harmonised", "occ_mother_harmonised", "occ_father_harmonised")
+
+alspac_g1_vars <- c("edu_mother_harmonised","edu_father_harmonised","occ_mother_harmonised","occ_father_harmonised","ethnicity_harmonised")
+
+abcd_table1 <- create_descriptive_table(abcd_der, abcd_vars)
+bcs_table1 <- create_descriptive_table(bcs_der, bcs_vars)
+raine_table1 <- create_descriptive_table(raine_der, raine_vars)
+alspac_g0_table1 <- create_descriptive_table(alspac_g0_der, alspac_g0_vars)
+alspac_g1_table1 <- create_descriptive_table(alspac_g1_der, alspac_g1_vars)
+
+write.csv(abcd_table1,"ABCD_sample_characteristics.csv",row.names=FALSE)
+write.csv(bcs_table1,"BCS70_sample_characteristics.csv",row.names=FALSE)
+write.csv(raine_table1,"RAINE_sample_characteristics.csv",row.names=FALSE)
+write.csv(alspac_g0_table1,"ALSPAC_G0_sample_characteristics.csv",row.names=FALSE)
+write.csv(alspac_g1_table1,"ALSPAC_G1_sample_characteristics.csv",row.names=FALSE)
+
+```
+
+##Statified analysis by SES
+```{r}
+library(dplyr)
+
+abcd_der$hmb_mp_ever <- apply(
+  abcd_der[, grep("^hmb_mp_age", names(abcd_der))],
+  1,
+  function(x) if(all(is.na(x))) NA else max(x, na.rm = TRUE)
+)
+
+bcs_der$hmb_mp_ever <- apply(
+  bcs_der[, grep("^hmb_mp_age", names(bcs_der))],
+  1,
+  function(x) if(all(is.na(x))) NA else max(x, na.rm = TRUE)
+)
+
+raine_der$hmb_mp_ever <- apply(
+  raine_der[, grep("^hmb_mp_age", names(raine_der))],
+  1,
+  function(x) if(all(is.na(x))) NA else max(x, na.rm = TRUE)
+)
+
+alspac_g1_der$hmb_mp_ever <- apply(
+  alspac_g1_der[, grep("^hmb_mp_age", names(alspac_g1_der))],
+  1,
+  function(x) if(all(is.na(x))) NA else max(x, na.rm = TRUE)
+)
+
+alspac_g0_der$hmb_mp_ever <- apply(
+  alspac_g0_der[, grep("^hmb_mp_age", names(alspac_g0_der))],
+  1,
+  function(x) if(all(is.na(x))) NA else max(x, na.rm = TRUE)
+)
+
+make_symptom_table <- function(data, vars, outcome){
+
+  results <- list()
+
+  for(v in vars){
+
+    df <- data %>%
+      filter(
+        !is.na(.data[[v]]),
+        !is.na(.data[[outcome]])
+      )
+
+    tab <- df %>%
+      group_by(.data[[v]]) %>%
+      summarise(
+
+        N = n(),
+
+        HMB = paste0(
+          sum(.data[[outcome]] %in% c(1,3)),
+          " (",
+          round(
+            100 * mean(.data[[outcome]] %in% c(1,3)),
+            1
+          ),
+          ")"
+        ),
+
+        MP = paste0(
+          sum(.data[[outcome]] %in% c(2,3)),
+          " (",
+          round(
+            100 * mean(.data[[outcome]] %in% c(2,3)),
+            1
+          ),
+          ")"
+        ),
+
+        Either = paste0(
+          sum(.data[[outcome]] %in% c(1,2,3)),
+          " (",
+          round(
+            100 * mean(.data[[outcome]] %in% c(1,2,3)),
+            1
+          ),
+          ")"
+        ),
+
+        HMB_only = paste0(
+          sum(.data[[outcome]] == 1),
+          " (",
+          round(
+            100 * mean(.data[[outcome]] == 1),
+            1
+          ),
+          ")"
+        ),
+
+        MP_only = paste0(
+          sum(.data[[outcome]] == 2),
+          " (",
+          round(
+            100 * mean(.data[[outcome]] == 2),
+            1
+          ),
+          ")"
+        ),
+
+        Both = paste0(
+          sum(.data[[outcome]] == 3),
+          " (",
+          round(
+            100 * mean(.data[[outcome]] == 3),
+            1
+          ),
+          ")"
+        ),
+
+        Neither = paste0(
+          sum(.data[[outcome]] == 0),
+          " (",
+          round(
+            100 * mean(.data[[outcome]] == 0),
+            1
+          ),
+          ")"
+        ),
+
+        .groups = "drop"
+      )
+
+    names(tab)[1] <- "Category"
+
+    tab$Variable <- v
+
+    tab <- tab %>%
+      select(
+        Variable,
+        Category,
+        N,
+        HMB,
+        MP,
+        Either,
+        HMB_only,
+        MP_only,
+        Both,
+        Neither
+      )
+
+    results[[v]] <- tab
+  }
+
+  bind_rows(results)
+}
+
+abcd_vars <- c(
+  "edu_parent_harmonised",
+  "income_harmonised",
+  "ethnicity_harmonised"
+)
+
+bcs_vars <- c(
+  "edu_mother_harmonised",
+  "edu_father_harmonised",
+  "occ_mother_harmonised",
+  "occ_father_harmonised",
+  "income_harmonised",
+  "ethnicity_harmonised"
+)
+
+raine_vars <- c(
+  "edu_mother_harmonised",
+  "edu_father_harmonised",
+  "income_harmonised",
+  "ethnicity_harmonised"
+)
+
+g0_vars <- c(
+  "ethnicity_harmonised",
+  "occ_mother_harmonised",
+  "occ_father_harmonised"
+)
+
+g1_vars <- c(
+  "edu_mother_harmonised",
+  "edu_father_harmonised",
+  "occ_mother_harmonised",
+  "occ_father_harmonised",
+  "ethnicity_harmonised"
+)
+
+abcd_sep_table <- make_symptom_table(
+  abcd_der,
+  abcd_vars,
+  "hmb_mp_ever"
+)
+
+bcs_sep_table <- make_symptom_table(
+  bcs_der,
+  bcs_vars,
+  "hmb_mp_ever"
+)
+
+raine_sep_table <- make_symptom_table(
+  raine_der,
+  raine_vars,
+  "hmb_mp_ever"
+)
+
+alspac_g0_sep_table <- make_symptom_table(
+  alspac_g0_der,
+  g0_vars,
+  "hmb_mp_ever"
+)
+
+alspac_g1_sep_table <- make_symptom_table(
+  alspac_g1_der,
+  g1_vars,
+  "hmb_mp_ever"
+)
+
+write.csv(
+  abcd_sep_table,
+  "ABCD_SEP_symptoms.csv",
+  row.names = FALSE
+)
+
+write.csv(
+  bcs_sep_table,
+  "BCS70_SEP_symptoms.csv",
+  row.names = FALSE
+)
+
+write.csv(
+  raine_sep_table,
+  "RAINE_SEP_symptoms.csv",
+  row.names = FALSE
+)
+
+write.csv(
+  alspac_g0_sep_table,
+  "ALSPAC_G0_SEP_symptoms.csv",
+  row.names = FALSE
+)
+
+write.csv(
+  alspac_g1_sep_table,
+  "ALSPAC_G1_SEP_symptoms.csv",
+  row.names = FALSE
+)
+```
+
+#SEP table for plotting
+```{r}
+library(dplyr)
+library(tidyr)
+library(stringr)
+
+make_export_table <- function(tab, cohort){
+
+  tab %>%
+
+    mutate(
+
+      Cohort = cohort,
+
+      Demographic = recode(
+        Variable,
+        edu_parent_harmonised = "Parental education",
+        edu_mother_harmonised = "Mother's education",
+        edu_father_harmonised = "Father's education",
+        occ_mother_harmonised = "Mother's occupation",
+        occ_father_harmonised = "Father's occupation",
+        income_harmonised = "Household income"
+      )
+
+    ) %>%
+
+    # Remove ethnicity
+    filter(Variable != "ethnicity_harmonised") %>%
+
+    mutate(
+
+      Level = case_when(
+        Category %in% c(1, "1", "low", "Low") ~ "Low",
+        Category %in% c(2, "2", "medium", "Medium") ~ "Medium",
+        Category %in% c(3, "3", "high", "High") ~ "High",
+        TRUE ~ as.character(Category)
+      )
+
+    ) %>%
+
+    pivot_longer(
+      cols = c(HMB, MP, Either),
+      names_to = "Symptom",
+      values_to = "Value"
+    ) %>%
+
+    mutate(
+      Cases = as.numeric(stringr::str_extract(Value, "^[0-9]+")),
+      Total = N
+    ) %>%
+
+    select(
+      Cohort,
+      Symptom,
+      Demographic,
+      Level,
+      Total,
+      Cases
+    )
+
+}
+
+abcd_export <- make_export_table(abcd_sep_table, "ABCD")
+
+g1_export <- make_export_table(alspac_g1_sep_table, "ALSPAC G1")
+
+raine_export <- make_export_table(raine_sep_table, "Raine")
+
+bcs_export <- make_export_table(bcs_sep_table, "BCS70")
+
+g0_export <- make_export_table(alspac_g0_sep_table, "ALSPAC G0")
+g0_manual <- tribble(
+~Cohort, ~Symptom, ~Demographic, ~Level, ~Total, ~Cases,
+
+# Mother's education
+"ALSPAC G0","HMB","Mother's education","Low",4963,4460,
+"ALSPAC G0","HMB","Mother's education","Medium",2381,2170,
+"ALSPAC G0","HMB","Mother's education","High",365,327,
+
+"ALSPAC G0","MP","Mother's education","Low",4963,3065,
+"ALSPAC G0","MP","Mother's education","Medium",2381,1440,
+"ALSPAC G0","MP","Mother's education","High",365,207,
+
+"ALSPAC G0","Either","Mother's education","Low",4963,4535,
+"ALSPAC G0","Either","Mother's education","Medium",2381,2196,
+"ALSPAC G0","Either","Mother's education","High",365,337,
+
+# Father's education
+"ALSPAC G0","HMB","Father's education","Low",4516,4064,
+"ALSPAC G0","HMB","Father's education","Medium",1898,1731,
+"ALSPAC G0","HMB","Father's education","High",899,817,
+
+"ALSPAC G0","MP","Father's education","Low",4516,2764,
+"ALSPAC G0","MP","Father's education","Medium",1898,1188,
+"ALSPAC G0","MP","Father's education","High",899,519,
+
+"ALSPAC G0","Either","Father's education","Low",4516,4129,
+"ALSPAC G0","Either","Father's education","Medium",1898,1751,
+"ALSPAC G0","Either","Father's education","High",899,832
+)
+
+g0_export <- bind_rows(
+  g0_export,
+  g0_manual
+)
+
+moba_export <- tribble(
+~Cohort, ~Symptom, ~Demographic, ~Level, ~Total, ~Cases,
+
+"MoBa","HMB","Mother's education","Low",286,78,
+"MoBa","HMB","Mother's education","Medium",1257,317,
+"MoBa","HMB","Mother's education","High",3336,813,
+
+"MoBa","HMB","Father's education","Low",436,111,
+"MoBa","HMB","Father's education","Medium",1723,414,
+"MoBa","HMB","Father's education","High",2491,624,
+
+"MoBa","HMB","Parental education","Low",NA,NA,
+"MoBa","HMB","Parental education","Medium",NA,NA,
+"MoBa","HMB","Parental education","High",NA,NA,
+
+"MoBa","HMB","Mother's occupation","Low",NA,NA,
+"MoBa","HMB","Mother's occupation","Medium",NA,NA,
+"MoBa","HMB","Mother's occupation","High",NA,NA,
+
+"MoBa","HMB","Father's occupation","Low",NA,NA,
+"MoBa","HMB","Father's occupation","Medium",NA,NA,
+"MoBa","HMB","Father's occupation","High",NA,NA,
+
+"MoBa","HMB","Household income","Low",1935,488,
+"MoBa","HMB","Household income","Medium",1159,271,
+"MoBa","HMB","Household income","High",1469,368,
+
+"MoBa","MP","Mother's education","Low",286,219,
+"MoBa","MP","Mother's education","Medium",1257,934,
+"MoBa","MP","Mother's education","High",3336,2453,
+
+"MoBa","MP","Father's education","Low",436,334,
+"MoBa","MP","Father's education","Medium",1723,1279,
+"MoBa","MP","Father's education","High",2491,1829,
+
+"MoBa","MP","Parental education","Low",NA,NA,
+"MoBa","MP","Parental education","Medium",NA,NA,
+"MoBa","MP","Parental education","High",NA,NA,
+
+"MoBa","MP","Mother's occupation","Low",NA,NA,
+"MoBa","MP","Mother's occupation","Medium",NA,NA,
+"MoBa","MP","Mother's occupation","High",NA,NA,
+
+"MoBa","MP","Father's occupation","Low",NA,NA,
+"MoBa","MP","Father's occupation","Medium",NA,NA,
+"MoBa","MP","Father's occupation","High",NA,NA,
+
+"MoBa","MP","Household income","Low",1935,1460,
+"MoBa","MP","Household income","Medium",1159,851,
+"MoBa","MP","Household income","High",1469,1068,
+
+"MoBa","Either","Mother's education","Low",286,231,
+"MoBa","Either","Mother's education","Medium",1257,971,
+"MoBa","Either","Mother's education","High",3336,2570,
+
+"MoBa","Either","Father's education","Low",436,345,
+"MoBa","Either","Father's education","Medium",1723,1332,
+"MoBa","Either","Father's education","High",2491,1921,
+
+"MoBa","Either","Parental education","Low",NA,NA,
+"MoBa","Either","Parental education","Medium",NA,NA,
+"MoBa","Either","Parental education","High",NA,NA,
+
+"MoBa","Either","Mother's occupation","Low",NA,NA,
+"MoBa","Either","Mother's occupation","Medium",NA,NA,
+"MoBa","Either","Mother's occupation","High",NA,NA,
+
+"MoBa","Either","Father's occupation","Low",NA,NA,
+"MoBa","Either","Father's occupation","Medium",NA,NA,
+"MoBa","Either","Father's occupation","High",NA,NA,
+
+"MoBa","Either","Household income","Low",1935,1521,
+"MoBa","Either","Household income","Medium",1159,885,
+"MoBa","Either","Household income","High",1469,1122
+)
+
+sep_export <- bind_rows(
+  abcd_export,
+  g1_export,
+  raine_export,
+  moba_export,
+  bcs_export,
+  g0_export
+)
+
+sep_export <- sep_export %>%
+
+  mutate(
+
+    Cohort = factor(
+      Cohort,
+      levels = c(
+        "ABCD",
+        "ALSPAC G1",
+        "Raine",
+        "MoBa",
+        "BCS70",
+        "ALSPAC G0"
+      )
+    ),
+
+    Symptom = factor(
+      Symptom,
+      levels = c("HMB", "MP", "Either")
+    ),
+
+    Demographic = factor(
+      Demographic,
+      levels = c(
+        "Mother's education",
+        "Father's education",
+        "Parental education",
+        "Mother's occupation",
+        "Father's occupation",
+        "Household income"
+      )
+    ),
+
+    Level = factor(
+      Level,
+      levels = c("Low", "Medium", "High")
+    )
+
+  ) %>%
+
+  arrange(
+    Cohort,
+    Symptom,
+    Demographic,
+    Level
+  )
+
+write.csv(
+  sep_export,
+  "SEP_prevalence_counts.csv",
+  row.names = FALSE
+)
+
+
+```
+
+
+#Prevalence ratios (Figure S4)
+```{r}
+dat <- sep_export
+library(writexl)
+
+# Calculate prevalence
+dat2 <- dat %>%
+  mutate(prev = Cases / Total)
+
+# Get prevalence in High group (reference)
+pr_dat <- dat2 %>%
+  select(Cohort, Symptom, Demographic, Level, prev, Cases, Total) %>%
+  left_join(
+    dat2 %>%
+      filter(Level == "High") %>%
+      select(
+        Cohort, Symptom, Demographic,
+        prev_ref = prev,
+        Cases_ref = Cases,
+        Total_ref = Total
+      ),
+    by = c("Cohort", "Symptom", "Demographic")
+  ) %>%
+  mutate(
+    PR = prev / prev_ref,
+    
+    # Wald CI on log(PR)
+    se_logPR = sqrt(
+      (1/Cases) - (1/Total) +
+        (1/Cases_ref) - (1/Total_ref)
+    ),
+    
+    lower = exp(log(PR) - 1.96 * se_logPR),
+    upper = exp(log(PR) + 1.96 * se_logPR)
+  )
+
+pr_dat$lower[pr_dat$Level=="High"]<-1
+pr_dat$upper[pr_dat$Level=="High"]<-1
+
+pr_dat$Level <- factor(pr_dat$Level,ordered=T,levels=c("Low","Medium","High"))
+
+pr_table <- pr_dat %>%
+  mutate(
+    PR = round(PR, 2),
+    lower = round(lower, 2),
+    upper = round(upper, 2),
+    `PR (95% CI)` = sprintf("%.2f (%.2f–%.2f)", PR, lower, upper)
+  ) %>%
+  select(
+    Cohort,
+    Symptom,
+    Demographic,
+    Level,
+    Cases,
+    Total,
+    prev,
+    PR,
+    lower,
+    upper,
+    `PR (95% CI)`
+  )
+
+write_xlsx(
+  pr_table,
+  "Prevalence_ratios_with_CIs.xlsx"
+)
+
+ggplot(
+  na.omit(pr_dat),
+  aes(
+    y = Level,
+    x = PR,
+    xmin = lower,
+    xmax = upper,
+    colour=Level
+  )
+) +
+  geom_vline(xintercept = 1, linetype = 2,colour="grey60") +
+  geom_pointrange(
+    size=0.2,
+    position = position_dodge(width = 0.4)
+  ) +
+  facet_nested(Cohort+Demographic ~ Symptom,scales="free",space="free_y", switch="y", strip = strip_nested(size = "variable")) +
+  theme_light() +
+  scale_colour_manual(values=c('Low'="#cc4c02",'Medium'="#fe9929",'High'="#fed98e"))+
+  labs(
+    y = NULL,
+    x = "Prevalence ratio (vs High)"
+  )+
+  theme(strip.text.y.left = element_text(angle = 0),
+        panel.grid.major=element_blank(), panel.grid.minor=element_blank(),
+        axis.text.y = element_blank(),axis.ticks.y=element_blank(),
+        legend.position = "bottom",panel.spacing = unit(0.1, "lines"))
+
+ggsave("prevalence_ratio.png", width = 10, height = 12, dpi = 500)
+
+```
+
+##Prevelance by SES bar plot (Figure S3)
+```{r}
+#Calculate prevalence
+dat <- dat %>%
+  mutate(
+    Prevalence = (Cases / Total) * 100
+  )
+
+#Order symptoms
+dat <- dat %>%
+  mutate(Symptom = factor(Symptom, levels = c("HMB", "MP", "Either"))
+  )
+
+#Order demo factors
+dat$Demographic <- factor(
+  dat$Demographic,
+  levels = c(
+    "Mother's education",
+    "Father's education",
+    "Parental education",
+    "Household income",
+    "Mother's occupation",
+    "Father's occupation")
+)
+
+#Order demo levels
+dat <- dat %>%
+  mutate(Level = factor(Level, levels = c("Low", "Medium", "High"))
+  )
+
+#Plot 
+ggplot(
+  dat,
+  aes(x = Symptom, y = Prevalence, fill = Level)
+) +
+  scale_y_continuous(
+    limits = c(0, 110), #extra space on y axis for vertical prevalence text
+    breaks = seq(0, 100, by = 20)
+  ) +
+  geom_col(
+    position = position_dodge(width = 0.8), width = 0.7
+  ) +
+  geom_text(
+    aes(label = sprintf("%.1f", Prevalence)),
+    position = position_dodge(width = 0.8),
+    vjust = 0.4, hjust = -0.05, angle = 90, size = 2.7
+  ) +
+  facet_grid(
+    Cohort ~ Demographic, scales = "free_x", space = "free_x"
+  ) +
+  labs(
+    x = NULL, y = "Prevalence (%)"
+  ) +
+  theme_bw() +
+  theme(
+    strip.background = element_rect(fill = "grey95"),
+    strip.text.x = element_text(face = "bold", size=8),
+    strip.text.y = element_text(face = "bold", size=9),
+    axis.text.x = element_text(size = 9)
+  ) +
+  scale_fill_manual(
+    values = c(
+      "Low" = "#cc4c02",
+      "Medium" = "#fe9929",
+      "High" = "#fed98e"
+    )
+  )
+
+ggsave("ses_bar_plot.png", width = 10, height = 12, dpi = 500)
+
+```
+
+##Ethnicity (Figure S5)
+```{r}
+ethnicity_plot <- tribble(
+  ~Cohort, ~Ethnicity, ~HMB, ~MP, ~Either,
+
+  # ABCD
+  "ABCD", "White", 32.9, 59.4, 66.3,
+  "ABCD", "Black", 32.4, 75.1, 79.5,
+  "ABCD", "Asian", 27.7, 47.9, 57.4,
+  "ABCD", "Other", 35.1, 65.6, 72.5,
+
+  # ALSPAC G1
+  "ALSPAC G1", "White", 58.0, 72.4, 81.6,
+  "ALSPAC G1", "Non-white", 66.7, 73.1, 83.3,
+
+  # Raine
+  "Raine", "White", 40.3, 64.8, 75.5,
+  "Raine", "Non-white", 38.4, 52.3, 69.8,
+
+    # BCS70
+  "BCS70", "White", 58.5, 48.4, 66.1,
+  "BCS70", "Non-white", 56.9, 53.8, 67.7,
+
+  # ALSPAC G0
+  "ALSPAC G0", "White", 89.9, 61.1, 92.9,
+  "ALSPAC G0", "Non-white", 93.4, 60.2, 95.3
+)
+library(tidyr)
+
+ethnicity_long <- ethnicity_plot %>%
+  pivot_longer(
+    cols = c(HMB, MP, Either),
+    names_to = "Symptom",
+    values_to = "Prevalence"
+  )
+
+library(ggplot2)
+library(dplyr)
+
+ethnicity_long$Ethnicity <- factor(
+  ethnicity_long$Ethnicity,
+  levels = c("White","Black","Asian","Other","Non-white")
+)
+
+ethnicity_long$Cohort <- factor(
+  ethnicity_long$Cohort,
+  levels = c(
+    "ABCD",
+    "ALSPAC G1",
+    "Raine",
+    "BCS70",
+    "ALSPAC G0"
+  )
+)
+
+ethnicity_plot <- ggplot(
+  ethnicity_long,
+  aes(
+    x = Symptom,
+    y = Prevalence,
+    fill = Ethnicity
+  )
+) +
+
+  geom_col(
+    position = position_dodge(width = 0.8),
+    width = 0.7
+  ) +
+
+  geom_text(
+    aes(
+      label = round(Prevalence, 1)
+    ),
+    position = position_dodge(width = 0.8),
+    vjust = -0.25,
+    angle = 0,
+    size = 3
+  ) +
+
+  facet_wrap(
+    ~ Cohort,
+    nrow = 1
+  ) +
+
+  scale_y_continuous(
+    limits = c(0, 110),
+    expand = expansion(mult = c(0, 0.02))
+  ) +
+
+  labs(
+    x = NULL,
+    y = "Prevalence (%)",
+    fill = "Ethnicity"
+  ) +
+
+  theme_bw(base_size = 12) +
+
+  theme(
+    legend.position = "bottom",
+
+    strip.background = element_rect(
+      fill = "grey90",
+      colour = "black"
+    ),
+
+    strip.text = element_text(
+      face = "bold"
+    ),
+
+    panel.grid.major.x = element_blank(),
+
+    axis.text.x = element_text(
+      angle = 0,
+      hjust = 0.5
+    )
+  )
+
+ethnicity_plot
+
+ggsave("ethnicity_prevalence_plot.png", ethnicity_plot, width = 14, height = 7, dpi = 300)
+
+library(dplyr)
+library(writexl)
+library(tibble)
+
+eth <- tribble(
+  ~Cohort, ~Ethnicity, ~Symptom, ~Cases, ~Total,
+
+  # ABCD
+"ABCD","White","HMB",878,2665,
+"ABCD","Black","HMB",250,772,
+"ABCD","Asian","HMB",26,94,
+"ABCD","Others","HMB",545,1554,
+
+"ABCD","White","MP",1582,2665,
+"ABCD","Black","MP",580,772,
+"ABCD","Asian","MP",45,94,
+"ABCD","Others","MP",1020,1554,
+
+"ABCD","White","Either",1768,2665,
+"ABCD","Black","Either",614,772,
+"ABCD","Asian","Either",54,94,
+"ABCD","Others","Either",1126,1554,
+
+  # ALSPAC G1
+  "ALSPAC G1","White","HMB",2095,3610,
+  "ALSPAC G1","Non-white","HMB",104,156,
+
+  "ALSPAC G1","White","MP",2614,3610,
+  "ALSPAC G1","Non-white","MP",113,156,
+
+  "ALSPAC G1","White","Either",2945,3610,
+  "ALSPAC G1","Non-white","Either",130,156,
+
+  # Raine
+  "Raine","White","HMB",220,546,
+  "Raine","Non-white","HMB",33,86,
+
+  "Raine","White","MP",354,546,
+  "Raine","Non-white","MP",45,86,
+
+  "Raine","White","Either",412,546,
+  "Raine","Non-white","Either",60,86,
+
+  # BCS70
+"BCS70","White","HMB",1762,3014,
+"BCS70","Non-white","HMB",37,65,
+
+"BCS70","White","MP",1459,3014,
+"BCS70","Non-white","MP",35,65,
+
+"BCS70","White","Either",1993,3014,
+"BCS70","Non-white","Either",44,65,
+
+# ALSPAC G0
+"ALSPAC G0","White","HMB",8833,9832,
+"ALSPAC G0","Non-white","HMB",197,211,
+
+"ALSPAC G0","White","MP",6003,9832,
+"ALSPAC G0","Non-white","MP",127,211,
+
+"ALSPAC G0","White","Either",9129,9832,
+"ALSPAC G0","Non-white","Either",201,211
+)
+
+eth <- eth %>%
+  mutate(prev = Cases / Total)
+
+eth_pr <- eth %>%
+  left_join(
+    eth %>%
+      filter(Ethnicity == "White") %>%
+      select(
+        Cohort,
+        Symptom,
+        prev_ref = prev,
+        Cases_ref = Cases,
+        Total_ref = Total
+      ),
+    by = c("Cohort","Symptom")
+  ) %>%
+  mutate(
+    PR = prev / prev_ref,
+
+    se_logPR = sqrt(
+      (1/Cases) - (1/Total) +
+      (1/Cases_ref) - (1/Total_ref)
+    ),
+
+    lower = exp(log(PR) - 1.96 * se_logPR),
+    upper = exp(log(PR) + 1.96 * se_logPR)
+  )
+
+## Reference group
+eth_pr <- eth_pr %>%
+  mutate(
+    PR = ifelse(Ethnicity == "White", 1, PR),
+    lower = ifelse(Ethnicity == "White", 1, lower),
+    upper = ifelse(Ethnicity == "White", 1, upper)
+  )
+
+eth_table <- eth_pr %>%
+  mutate(
+    Prevalence = round(prev*100,1),
+    PR = round(PR,2),
+    lower = round(lower,2),
+    upper = round(upper,2),
+    `PR (95% CI)` = sprintf("%.2f (%.2f–%.2f)", PR, lower, upper)
+  ) %>%
+  select(
+    Cohort,
+    Symptom,
+    Ethnicity,
+    Cases,
+    Total,
+    Prevalence,
+    `PR (95% CI)`
+  )
+
+write_xlsx(
+  eth_table,
+  "Ethnicity_prevalence_ratios.xlsx"
+)
+
+```
+
+#Incidence analysis
+## Incidence by gynaecological age (Figure 5)
+
+```{r}
+library(readxl)
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+
+# Import incidence tables exported from Stata
+abcd_inc <- read_excel("C:/Users/sk1014/OneDrive - University of Exeter/Sharp, Gemma's files - Shared/Analysis plans/Analysis/Aim 1/abcd_incidence.xlsx") %>%
+  mutate(cohort = "ABCD")
+
+g1_inc <- read_excel("C:/Users/sk1014/OneDrive - University of Exeter/Sharp, Gemma's files - Shared/Analysis plans/Analysis/Aim 1/alspac_g1_incidence.xlsx") %>%
+  mutate(cohort = "ALSPAC G1")
+
+abcd_inc <- abcd_inc %>%
+  mutate(
+    cohort = "ABCD")
+
+g1_inc <- g1_inc %>%
+  mutate(
+    cohort = "ALSPAC G1")
+
+combined_inc <- bind_rows(abcd_inc, g1_inc)
+
+# Combine cohorts
+combined_inc <- bind_rows(abcd_inc,g1_inc)
+
+# Keep post-menarche only
+combined_inc <- combined_inc %>%
+  filter(ts_menarche >= 0)
+
+library(binom)
+
+# Wilson CIs
+hmb_ci <- binom.wilson(
+  combined_inc$incident_hmb,
+  combined_inc$risk_hmb
+)
+
+mp_ci <- binom.wilson(
+  combined_inc$incident_mp,
+  combined_inc$risk_mp
+)
+
+combined_inc <- combined_inc %>%
+  mutate(
+    hmb_lower = hmb_ci$lower,
+    hmb_upper = hmb_ci$upper,
+    mp_lower  = mp_ci$lower,
+    mp_upper  = mp_ci$upper
+  )
+
+combined_inc_long <- bind_rows(
+
+  combined_inc %>%
+    transmute(
+      cohort,
+      ts_half,
+      type = "HMB ever",
+      incidence = hmb_incidence,
+      lower = hmb_lower,
+      upper = hmb_upper
+    ),
+
+  combined_inc %>%
+    transmute(
+      cohort,
+      ts_half,
+      type = "MP ever",
+      incidence = mp_incidence,
+      lower = mp_lower,
+      upper = mp_upper
+    )
+)
+
+combined_inc_ts <- combined_inc
+
+ggplot(
+  combined_inc_long,
+  aes(
+    x = ts_half,
+    y = incidence*100,
+    colour = type
+  )
+) +
+
+  geom_line(linewidth = 1) +
+  geom_point(size = 1.8) +
+  geom_errorbar(
+  aes(
+    ymin = lower * 100,
+    ymax = upper * 100
+  ),
+  width = 0.15,
+  linewidth = 0.4
+) +
+
+  geom_vline(
+    xintercept = 0,
+    linetype = "dashed"
+  ) +
+
+  facet_wrap(
+    ~cohort,
+    scales = "free_x"
+  ) +
+
+  scale_color_manual(
+    values = c(
+      "HMB ever" = "black",
+      "MP ever" = "grey50"
+    )
+  ) +
+
+  labs(
+    x = "Time since menarche (years)",
+    y = "Incidence (%)",
+    color = "Symptom"
+  ) +
+
+  theme_minimal(base_size = 14) +
+
+theme(
+  legend.position = "bottom"
+)
+
+ggsave(
+  "incidence_menarche_plot.png",
+  width = 12,
+  height = 5,
+  dpi = 300
+)
+```
+
+
+##Incidence by chronological age (Figure 4)
+
+```{r}
+
+# Import incidence tables exported from Stata
+abcd_inc <- read_excel("C:/Users/sk1014/OneDrive - University of Exeter/Sharp, Gemma's files - Shared/Analysis plans/Analysis/Aim 1/abcd_incidence_age.xlsx") %>%  
+  rename(age = age_year)
+
+g1_inc <- read_excel("C:/Users/sk1014/OneDrive - University of Exeter/Sharp, Gemma's files - Shared/Analysis plans/Analysis/Aim 1/alspac_g1_incidence_age.xlsx") %>% 
+  rename(age = age_year)
+  
+
+abcd_inc <- abcd_inc %>%
+  mutate(
+    cohort = "ABCD")
+
+g1_inc <- g1_inc %>%
+  mutate(
+    cohort = "ALSPAC G1")
+
+combined_inc <- bind_rows(abcd_inc, g1_inc)
+combined_inc <- combined_inc %>%
+  mutate(
+    hmb_incidence = ifelse(risk_hmb < 5, NA, hmb_incidence),
+    mp_incidence  = ifelse(risk_mp  < 5, NA, mp_incidence)
+  )
+library(binom)
+
+# HMB confidence intervals
+hmb_ci <- binom.wilson(
+  combined_inc$incident_hmb,
+  combined_inc$risk_hmb
+)
+
+# MP confidence intervals
+mp_ci <- binom.wilson(
+  combined_inc$incident_mp,
+  combined_inc$risk_mp
+)
+
+combined_inc <- combined_inc %>%
+  mutate(
+    hmb_lower = hmb_ci$lower,
+    hmb_upper = hmb_ci$upper,
+    mp_lower  = mp_ci$lower,
+    mp_upper  = mp_ci$upper
+  )
+
+combined_inc_long_age <- bind_rows(
+
+  combined_inc %>%
+    transmute(
+      cohort,
+      age,
+      type = "HMB ever",
+      incidence = hmb_incidence,
+      lower = hmb_lower,
+      upper = hmb_upper
+    ),
+
+  combined_inc %>%
+    transmute(
+      cohort,
+      age,
+      type = "MP ever",
+      incidence = mp_incidence,
+      lower = mp_lower,
+      upper = mp_upper
+    )
+
+)
+
+combined_inc_age <- combined_inc
+
+combined_inc_long_age$type <- factor(
+  combined_inc_long_age$type,
+  levels = c("HMB ever","MP ever")
+)
+combined_inc_long_age <- combined_inc_long_age %>%
+  mutate(
+    age_plot = case_when(
+      cohort == "ALSPAC G1" & age == 10 ~ "9–10",
+      cohort == "ALSPAC G1" & age == 11 ~ "11–12",
+      TRUE ~ as.character(age)
+    )
+  )
+
+# Keep ages in the correct order
+combined_inc_long_age$age_plot <- factor(
+  combined_inc_long_age$age_plot,
+  levels = c(
+    "9–10", "11–12",
+    "11","12","13","14","15","16","17","18"
+  )
+)
+
+age_plot <- ggplot(
+  combined_inc_long_age,
+  aes(
+    x = age_plot,
+    y = incidence * 100,
+    colour = type,
+    group = type
+  )
+) +
+
+  geom_line(linewidth = 1) +
+
+  geom_point(size = 2) +
+  geom_errorbar(
+  aes(
+    ymin = lower * 100,
+    ymax = upper * 100
+  ),
+  width = 0.15,
+  linewidth = 0.4
+) +
+
+  facet_wrap(
+    ~cohort,
+    scales = "free_x"
+  ) +
+
+  scale_color_manual(
+    values = c(
+      "HMB ever" = "black",
+      "MP ever"  = "grey50"
+    )
+  )  +
+
+  labs(
+    x = "Age (years)",
+    y = "Incidence (%)",
+    colour = "Symptom"
+  ) +
+
+  theme_minimal(base_size = 14) +
+
+  theme(
+    plot.title = element_text(face = "bold"),
+    legend.position = "bottom"
+  )
+
+age_plot
+
+ggsave(
+  "incidence_age_plot.png",
+  age_plot,
+  width = 12,
+  height = 5,
+  dpi = 300
+)
+```
+
+##Incidence table
+## Supplementary table - Incidence by time since menarche
+```{r}
+
+incidence_table_ts <- combined_inc_ts %>%
+
+  arrange(cohort, ts_half) %>%
+
+  mutate(
+
+    Time_since_menarche = case_when(
+      cohort == "ABCD" & ts_half == 8 ~ "8+",
+      cohort == "ALSPAC G1" & ts_half == 6 ~ "6+",
+      TRUE ~ sprintf("%.1f", ts_half)
+    ),
+
+    HMB_summary = sprintf(
+      "%d/%d (%.1f%%; %.1f-%.1f)",
+      incident_hmb,
+      risk_hmb,
+      hmb_incidence_pct,
+      hmb_lower * 100,
+      hmb_upper * 100
+    ),
+
+    MP_summary = sprintf(
+      "%d/%d (%.1f%%; %.1f-%.1f)",
+      incident_mp,
+      risk_mp,
+      mp_incidence_pct,
+      mp_lower * 100,
+      mp_upper * 100
+    )
+
+  ) %>%
+
+  select(
+    cohort,
+    Time_since_menarche,
+    HMB_summary,
+    MP_summary
+  )
+
+incidence_table_ts
+
+write.csv(
+  incidence_table_ts,
+  "incidence_supplementary_table_gynaecological_age.csv",
+  row.names = FALSE
+)
+```
+
+## Supplementary table - Incidence by chronological age
+```{r, echo=TRUE, results='asis', fig.show='hold'}
+
+incidence_table_age <- combined_inc_age %>%
+
+  arrange(cohort, age) %>%
+
+  mutate(
+
+    Age_group = case_when(
+
+      cohort == "ALSPAC G1" & age == 10 ~ "9-10",
+
+      cohort == "ALSPAC G1" & age == 11 ~ "11-12",
+
+      TRUE ~ as.character(age)
+
+    ),
+
+    HMB_summary = sprintf(
+      "%d/%d (%.1f%%; %.1f-%.1f)",
+      incident_hmb,
+      risk_hmb,
+      hmb_incidence_pct,
+      hmb_lower * 100,
+      hmb_upper * 100
+    ),
+
+    MP_summary = sprintf(
+      "%d/%d (%.1f%%; %.1f-%.1f)",
+      incident_mp,
+      risk_mp,
+      mp_incidence_pct,
+      mp_lower * 100,
+      mp_upper * 100
+    )
+
+  ) %>%
+
+  select(
+    cohort,
+    Age_group,
+    HMB_summary,
+    MP_summary
+  )
+
+incidence_table_age
+
+write.csv(
+  incidence_table_age,
+  "incidence_supplementary_table_chronological_age.csv",
+  row.names = FALSE
+)
+
+```
